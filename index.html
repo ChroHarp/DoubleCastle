@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>禁手棋遊戲</title>
+    <!-- 引入 Tailwind CSS 方便快速美化頁面 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 自訂樣式 */
+        .board-grid {
+            display: grid;
+            gap: 4px; /* 棋盤格線的間距 */
+            position: relative; /* 為了讓線條可以絕對定位 */
+        }
+        .cell {
+            width: 100%;
+            padding-bottom: 100%;
+            position: relative;
+            cursor: pointer;
+            border-radius: 8px; /* 圓角 */
+            transition: background-color 0.2s;
+            z-index: 1; /* 格子在最底層 */
+        }
+        .cell-inner {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        /* 棋子樣式 */
+        .piece {
+            width: 70%;
+            height: 70%;
+            border-radius: 50%;
+            transform: scale(0);
+            animation: place-piece 0.3s forwards;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            z-index: 2; /* 棋子在中間層 */
+        }
+        .piece-p1 { background-color: #1f2937; } /* 玩家1: 深灰色棋子 */
+        .piece-p2 { background-color: #f9fafb; border: 2px solid #4b5563; } /* 玩家2: 米白色棋子 */
+        @keyframes place-piece {
+            from { transform: scale(0); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        /* 禁手點樣式 */
+        .forbidden-mark {
+            color: #dc2626; font-weight: 900;
+            opacity: 0.8; line-height: 1; user-select: none;
+            /* 動態調整叉叉大小 */
+            font-size: clamp(1rem, 10vw / var(--board-size, 7), 2.5rem);
+        }
+        /* 黑色直線樣式 */
+        .cross-line {
+            position: absolute; background-color: rgba(0, 0, 0, 0.5);
+            pointer-events: none; z-index: 3; /* 將線條提到最上層 */
+        }
+        .horizontal-line { width: 100%; height: 3px; left: 0; }
+        .vertical-line { height: 100%; width: 3px; top: 0; }
+        /* 開關樣式 */
+        .toggle-checkbox:checked { right: 0; border-color: #4ade80; }
+        .toggle-checkbox:checked + .toggle-label { background-color: #4ade80; }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen font-sans p-4">
+
+    <div class="w-full max-w-lg mx-auto">
+        <header class="text-center mb-4">
+            <h1 class="text-4xl font-bold text-gray-800">禁手棋遊戲</h1>
+            <p class="text-gray-600 mt-2">規則：當某空格的「行」與「列」上共有 2 顆棋子時，該格即為禁手點。無棋可下者敗。</p>
+        </header>
+
+        <!-- 遊戲設定 -->
+        <div class="bg-white p-4 rounded-lg shadow mb-4">
+            <div class="flex flex-wrap justify-around items-center text-gray-700 gap-y-3">
+                <div class="flex items-center space-x-2">
+                    <label for="ai-toggle" class="font-medium">電腦對戰:</label>
+                    <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                        <input type="checkbox" name="ai-toggle" id="ai-toggle" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer" checked/>
+                        <label for="ai-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer"></label>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <label for="first-player-toggle" class="font-medium">玩家先手:</label>
+                    <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                        <input type="checkbox" name="first-player-toggle" id="first-player-toggle" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer" checked/>
+                        <label for="first-player-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer"></label>
+                    </div>
+                </div>
+                 <div class="flex items-center space-x-2 w-full justify-center pt-2 border-t mt-2">
+                    <label for="board-size-slider" class="font-medium">棋盤大小:</label>
+                    <input type="range" id="board-size-slider" min="1" max="7" value="7" class="w-32 cursor-pointer">
+                    <span id="board-size-label" class="font-semibold w-12 text-left">7 x 7</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 遊戲狀態顯示區 -->
+        <div id="status" class="text-center text-2xl font-semibold text-gray-700 mb-4 p-3 bg-white rounded-lg shadow"></div>
+
+        <!-- 遊戲資訊 -->
+        <div class="flex justify-between text-center mb-4 space-x-4">
+            <div class="flex-1 bg-red-100 p-2 rounded-lg">
+                <div class="text-sm text-red-700">消滅格數</div>
+                <div id="eliminated-count" class="text-2xl font-bold text-red-800">0</div>
+            </div>
+            <div class="flex-1 bg-green-100 p-2 rounded-lg">
+                <div class="text-sm text-green-700">剩餘格數</div>
+                <div id="remaining-count" class="text-2xl font-bold text-green-800">0</div>
+            </div>
+        </div>
+
+        <!-- 棋盤 -->
+        <main id="board" class="board-grid aspect-square bg-gray-400 p-2 rounded-xl shadow-lg"></main>
+
+        <!-- 按鈕區 -->
+        <footer class="flex justify-center items-center gap-2 mt-6">
+            <button id="undo-button" class="bg-yellow-500 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-yellow-600 transition-transform transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:scale-100">回到上一步</button>
+            <button id="restart-button" class="bg-blue-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-blue-700 transition-transform transform hover:scale-105">重新開始</button>
+            <button id="fullscreen-button" class="bg-gray-600 text-white p-3 rounded-lg shadow-md hover:bg-gray-700 transition-transform transform hover:scale-105" title="全螢幕">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+            </button>
+        </footer>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const boardElement = document.getElementById('board');
+            const statusElement = document.getElementById('status');
+            const restartButton = document.getElementById('restart-button');
+            const fullscreenButton = document.getElementById('fullscreen-button');
+            const undoButton = document.getElementById('undo-button');
+            const eliminatedCountElement = document.getElementById('eliminated-count');
+            const remainingCountElement = document.getElementById('remaining-count');
+            const aiToggle = document.getElementById('ai-toggle');
+            const firstPlayerToggle = document.getElementById('first-player-toggle');
+            const boardSizeSlider = document.getElementById('board-size-slider');
+            const boardSizeLabel = document.getElementById('board-size-label');
+
+            let BOARD_SIZE = 7;
+            let boardState, currentPlayer, gameOver;
+            let history = [];
+
+            function initGame() {
+                BOARD_SIZE = parseInt(boardSizeSlider.value);
+                document.documentElement.style.setProperty('--board-size', BOARD_SIZE);
+
+                boardState = Array(BOARD_SIZE).fill(0).map(() => Array(BOARD_SIZE).fill(0));
+                gameOver = false;
+                history = [];
+                
+                const playAgainstAI = aiToggle.checked;
+                const playerIsFirst = firstPlayerToggle.checked;
+
+                if (playAgainstAI) {
+                    currentPlayer = playerIsFirst ? 1 : 2;
+                    firstPlayerToggle.disabled = false;
+                } else {
+                    currentPlayer = 1;
+                    firstPlayerToggle.disabled = true;
+                }
+                
+                renderBoard();
+                updateStatus();
+                updateUndoButton();
+
+                if (playAgainstAI && !playerIsFirst && !gameOver) {
+                    setTimeout(makeAIMove, 500);
+                }
+            }
+
+            function renderBoard() {
+                boardElement.innerHTML = '';
+                boardElement.style.gridTemplateColumns = `repeat(${BOARD_SIZE}, 1fr)`;
+                boardElement.style.gridTemplateRows = `repeat(${BOARD_SIZE}, 1fr)`;
+                
+                const legalMoves = getLegalMoves();
+                
+                const occupiedRows = new Set();
+                const occupiedCols = new Set();
+                let pieceCount = 0;
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    for (let c = 0; c < BOARD_SIZE; c++) {
+                        if (boardState[r][c] > 0) {
+                            occupiedRows.add(r);
+                            occupiedCols.add(c);
+                            pieceCount++;
+                        }
+                    }
+                }
+
+                for (let row = 0; row < BOARD_SIZE; row++) {
+                    for (let col = 0; col < BOARD_SIZE; col++) {
+                        const cell = document.createElement('div');
+                        cell.className = 'cell bg-gray-200';
+                        cell.dataset.row = row;
+                        cell.dataset.col = col;
+                        const cellInner = document.createElement('div');
+                        cellInner.className = 'cell-inner';
+                        const cellState = boardState[row][col];
+                        const isLegal = legalMoves.some(move => move.row === row && move.col === col);
+                        if (cellState === 0) {
+                            const isPlayerTurn = (currentPlayer === 1) || (!aiToggle.checked && currentPlayer === 2);
+                            if (isLegal && isPlayerTurn) {
+                                cell.classList.add('hover:bg-blue-300');
+                            } else {
+                                cellInner.innerHTML = '<span class="forbidden-mark">×</span>';
+                                cell.classList.add('cursor-not-allowed');
+                            }
+                        } else {
+                            const pieceDiv = document.createElement('div');
+                            pieceDiv.className = `piece piece-p${cellState}`;
+                            cellInner.appendChild(pieceDiv);
+                        }
+                        cell.appendChild(cellInner);
+                        boardElement.appendChild(cell);
+                    }
+                }
+
+                const cellSizePercent = 100 / BOARD_SIZE;
+                const lineOffset = `calc(${cellSizePercent / 2}% - 1.5px)`;
+                occupiedRows.forEach(row => {
+                    const line = document.createElement('div');
+                    line.className = 'cross-line horizontal-line';
+                    line.style.top = `calc(${cellSizePercent * row}% + ${lineOffset})`;
+                    boardElement.appendChild(line);
+                });
+                occupiedCols.forEach(col => {
+                    const line = document.createElement('div');
+                    line.className = 'cross-line vertical-line';
+                    line.style.left = `calc(${cellSizePercent * col}% + ${lineOffset})`;
+                    boardElement.appendChild(line);
+                });
+
+                remainingCountElement.textContent = legalMoves.length;
+                eliminatedCountElement.textContent = (BOARD_SIZE * BOARD_SIZE) - pieceCount - legalMoves.length;
+            }
+            
+            function updateStatus() {
+                if (gameOver) {
+                    let winnerText;
+                    const winner = currentPlayer === 1 ? 2 : 1;
+                    if (aiToggle.checked) {
+                        winnerText = winner === 1 ? '你' : '電腦';
+                    } else {
+                        winnerText = `玩家 ${winner} (${winner === 1 ? '黑棋' : '白棋'})`;
+                    }
+                    statusElement.innerHTML = `遊戲結束！<span class="text-green-600">${winnerText} 獲勝！</span>`;
+                    statusElement.classList.add('bg-green-100');
+                } else {
+                    let turnText;
+                    if (aiToggle.checked) {
+                        turnText = currentPlayer === 1 ? '<span class="text-blue-600">你 (黑棋)</span>' : '<span class="text-gray-600">電腦 (白棋) 思考中...</span>';
+                    } else {
+                        turnText = `輪到 <span class="text-blue-600">玩家 ${currentPlayer} (${currentPlayer === 1 ? '黑棋' : '白棋'})</span>`;
+                    }
+                    statusElement.innerHTML = `輪到 ${turnText}`;
+                    statusElement.classList.remove('bg-green-100');
+                }
+            }
+
+            function isValidMove(row, col) {
+                if (boardState[row][col] > 0) return false;
+                const rowCount = boardState[row].reduce((sum, cell) => sum + (cell > 0 ? 1 : 0), 0);
+                const colCount = boardState.reduce((sum, r) => sum + (r[col] > 0 ? 1 : 0), 0);
+                return rowCount + colCount < 2;
+            }
+
+            function getLegalMoves() {
+                const moves = [];
+                if (gameOver) return moves;
+                for (let row = 0; row < BOARD_SIZE; row++) {
+                    for (let col = 0; col < BOARD_SIZE; col++) {
+                        if (isValidMove(row, col)) moves.push({ row, col });
+                    }
+                }
+                return moves;
+            }
+
+            function checkGameOver() {
+                if (getLegalMoves().length === 0) gameOver = true;
+            }
+
+            function makeAIMove() {
+                if (gameOver || !aiToggle.checked || currentPlayer !== 2) return;
+                const legalMoves = getLegalMoves();
+                if (legalMoves.length > 0) {
+                    const randomMove = legalMoves[Math.floor(Math.random() * legalMoves.length)];
+                    boardState[randomMove.row][randomMove.col] = 2;
+                    currentPlayer = 1;
+                    checkGameOver();
+                    renderBoard();
+                    updateStatus();
+                }
+            }
+            
+            function saveState() {
+                history.push({
+                    board: JSON.parse(JSON.stringify(boardState)),
+                    player: currentPlayer
+                });
+                updateUndoButton();
+            }
+
+            function handleUndo() {
+                if (history.length > 0) {
+                    const lastState = history.pop();
+                    boardState = lastState.board;
+                    currentPlayer = lastState.player;
+                    gameOver = false;
+                    renderBoard();
+                    updateStatus();
+                    updateUndoButton();
+                }
+            }
+
+            function updateUndoButton() {
+                undoButton.disabled = history.length === 0;
+            }
+
+            function handleCellClick(event) {
+                if (gameOver) return;
+                const isPlayerTurn = (currentPlayer === 1) || (!aiToggle.checked && currentPlayer === 2);
+                if (!isPlayerTurn) return;
+
+                const cell = event.target.closest('.cell');
+                if (!cell) return;
+                const row = parseInt(cell.dataset.row);
+                const col = parseInt(cell.dataset.col);
+
+                if (isValidMove(row, col)) {
+                    saveState();
+                    boardState[row][col] = currentPlayer;
+                    currentPlayer = currentPlayer === 1 ? 2 : 1;
+                    checkGameOver();
+                    renderBoard();
+                    updateStatus();
+
+                    if (!gameOver && aiToggle.checked && currentPlayer === 2) {
+                        setTimeout(makeAIMove, 800);
+                    }
+                }
+            }
+            
+            function toggleFullScreen() {
+                if (!document.fullscreenElement) {
+                    document.documentElement.requestFullscreen().catch(err => alert(`無法進入全螢幕模式: ${err.message}`));
+                } else {
+                    document.exitFullscreen();
+                }
+            }
+
+            // Event Listeners
+            boardElement.addEventListener('click', handleCellClick);
+            restartButton.addEventListener('click', initGame);
+            fullscreenButton.addEventListener('click', toggleFullScreen);
+            undoButton.addEventListener('click', handleUndo);
+            aiToggle.addEventListener('change', initGame);
+            firstPlayerToggle.addEventListener('change', initGame);
+            
+            boardSizeSlider.addEventListener('input', () => {
+                boardSizeLabel.textContent = `${boardSizeSlider.value} x ${boardSizeSlider.value}`;
+            });
+            boardSizeSlider.addEventListener('change', initGame);
+
+            initGame();
+        });
+    </script>
+</body>
+</html>
+
